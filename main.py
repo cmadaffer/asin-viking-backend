@@ -3,6 +3,15 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For testing, allow all. Later you can lock this down.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ASINCheckRequest(BaseModel):
     asins: List[str]
