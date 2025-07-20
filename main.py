@@ -1,49 +1,43 @@
-
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse, JSONResponse
-import httpx
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List, Optional
 
 app = FastAPI()
 
-CLIENT_ID = "amzn1.application-oa2-client.f6542d3481a64723a227d8edd73e6199"
-CLIENT_SECRET = "amzn1.oa2-cs.v1.bec64e9614743740db183d9f28c795aadefaced37efeadc403d4470c5c368a46"
-REDIRECT_URI = "https://your-app.onrender.com/api/auth/callback"
+class ASINCheckRequest(BaseModel):
+    asins: List[str]
+    marketplace_id: str
 
-AUTH_URL = (
-    "https://sellercentral.amazon.com/apps/authorize/consent?"
-    f"application_id={CLIENT_ID}&"
-    f"state=asin_viking_state&"
-    f"redirect_uri={REDIRECT_URI}&version=beta"
-)
+class ASINCheckResult(BaseModel):
+    asin: str
+    status: str
+    restriction_type: Optional[str]
+    approval_required: bool
 
-TOKEN_URL = "https://api.amazon.com/auth/o2/token"
+class ASINCheckResponse(BaseModel):
+    results: List[ASINCheckResult]
 
-@app.get("/login")
-def login():
-    return RedirectResponse(url=AUTH_URL)
+mock_asin_data = {
+    "B089KV4YYX": {"status": "gated", "restriction_type": "brand", "approval_required": True},
+    "B07PGL2ZSL": {"status": "open", "restriction_type": None, "approval_required": False},
+    "B08CFSZLQ4": {"status": "restricted", "restriction_type": "hazmat", "approval_required": True},
+}
 
-@app.get("/callback")
-async def callback(request: Request):
-    code = request.query_params.get("spapi_oauth_code")
-    if not code:
-        raise HTTPException(status_code=400, detail="Missing spapi_oauth_code")
+@app.post("/check-asins", response_model=ASINCheckResponse)
+def check_asins(request: ASINCheckRequest):
+    results = []
+    for asin in request.asins:
+        data = mock_asin_data.get(asin, {"status": "unknown", "restriction_type": None, "approval_required": False})
+        result = ASINCheckResult(
+            asin=asin,
+            status=data["status"],
+            restriction_type=data["restriction_type"],
+            approval_required=data["approval_required"]
+        )
+        results.append(result)
+    return ASINCheckResponse(results=results)
 
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "redirect_uri": REDIRECT_URI
-    }
+@app.get("/")
+def read_root():
+    return {"message": "ASIN Viking API is live. Use /check-asins to check gating."}
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(TOKEN_URL, data=data)
-
-    if response.status_code != 200:
-        return JSONResponse(content={"error": response.text}, status_code=response.status_code)
-
-    token_data = response.json()
-    return {
-        "refresh_token": token_data.get("refresh_token"),
-        "access_token": token_data.get("access_token")
-    }
